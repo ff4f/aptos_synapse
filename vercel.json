@@ -1,0 +1,40 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "frontend/package.json",
+      "use": "@vercel/next"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/frontend/$1"
+    }
+  ],
+  "env": {
+    "NEXT_PUBLIC_APTOS_NETWORK": "testnet",
+    "NEXT_PUBLIC_APTOS_NODE_URL": "https://fullnode.testnet.aptoslabs.com/v1",
+    "NEXT_PUBLIC_APTOS_FAUCET_URL": "https://faucet.testnet.aptoslabs.com",
+    "NEXT_PUBLIC_KANA_LABS_API_URL": "https://api.kanalabs.io/v1",
+    "NEXT_PUBLIC_NODIT_API_URL": "https://aptos-testnet.nodit.io",
+    "NEXT_PUBLIC_TAPP_EXCHANGE_API_URL": "https://api.tapp.exchange/v1",
+    "NEXT_PUBLIC_HYPERION_API_URL": "https://api.hyperion.xyz/v1"
+  },
+  "build": {
+    "env": {
+      "NEXT_PUBLIC_APTOS_NETWORK": "testnet",
+      "NEXT_PUBLIC_APTOS_NODE_URL": "https://fullnode.testnet.aptoslabs.com/v1",
+      "NEXT_PUBLIC_APTOS_FAUCET_URL": "https://faucet.testnet.aptoslabs.com",
+      "NEXT_PUBLIC_KANA_LABS_API_URL": "https://api.kanalabs.io/v1",
+      "NEXT_PUBLIC_NODIT_API_URL": "https://aptos-testnet.nodit.io",
+      "NEXT_PUBLIC_TAPP_EXCHANGE_API_URL": "https://api.tapp.exchange/v1",
+      "NEXT_PUBLIC_HYPERION_API_URL": "https://api.hyperion.xyz/v1"
+    }
+  },
+  "functions": {
+    "frontend/app/**/*.{js,ts,tsx}": {
+      "runtime": "nodejs18.x"
+    }
+  }
+}

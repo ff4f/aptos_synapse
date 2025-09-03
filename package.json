@@ -1,0 +1,76 @@
+{
+  "name": "aptos-synapse",
+  "version": "1.0.0",
+  "description": "Cross-chain DeFi Hub built on Aptos blockchain for DoraHacks CtrlMove Hackathon",
+  "main": "index.js",
+  "scripts": {
+    "dev": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "start": "cd frontend && npm start",
+    "lint": "cd frontend && npm run lint",
+    "test": "./scripts/test.sh",
+    "test:contracts": "./scripts/test.sh --contracts-only",
+    "test:frontend": "./scripts/test.sh --frontend-only",
+    "test:all": "./scripts/test.sh --all",
+    "deploy": "./scripts/deploy.sh",
+    "deploy:contracts": "./scripts/deploy.sh --skip-frontend",
+    "deploy:frontend": "./scripts/deploy.sh --skip-contracts",
+    "deploy:vercel": "./scripts/deploy.sh --vercel",
+    "setup": "cd frontend && npm install",
+    "clean": "cd frontend && rm -rf .next node_modules && cd ../contracts/aptos_synapse && rm -rf build",
+    "compile:contracts": "cd contracts/aptos_synapse && aptos move compile --named-addresses aptos_synapse=default",
+    "publish:contracts": "cd contracts/aptos_synapse && aptos move publish --named-addresses aptos_synapse=default",
+    "postinstall": "cd frontend && npm install"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-username/aptos-synapse.git"
+  },
+  "keywords": [
+    "aptos",
+    "defi",
+    "blockchain",
+    "cross-chain",
+    "lending",
+    "bridge",
+    "swap",
+    "analytics",
+    "hackathon",
+    "dorahacks",
+    "ctrlmove",
+    "move",
+    "smart-contracts",
+    "nextjs",
+    "react",
+    "typescript",
+    "web3",
+    "kana-labs",
+    "nodit",
+    "tapp-exchange",
+    "hyperion"
+  ],
+  "author": "Aptos Synapse Team",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/your-username/aptos-synapse/issues"
+  },
+  "homepage": "https://github.com/your-username/aptos-synapse#readme",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "workspaces": [
+    "frontend"
+  ],
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  },
+  "funding": {
+    "type": "hackathon",
+    "url": "https://dorahacks.io/hackathon/aptos-ctrlmove-hackathon"
+  },
+  "config": {
+    "aptos_network": "testnet",
+    "contract_address": "0x1"
+  }
+}

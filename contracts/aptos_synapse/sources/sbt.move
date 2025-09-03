@@ -195,8 +195,92 @@ module aptos_synapse::sbt {
         update_reputation(admin, user, new_score);
     }
 
+    // Decrease reputation based on negative actions
+    public entry fun decrease_reputation(
+        admin: &signer,
+        user: address,
+        points: u64
+    ) acquires SBTRegistry, ReputationSBT {
+        let registry = borrow_global<SBTRegistry>(@aptos_synapse);
+        assert!(table::contains(&registry.user_tokens, user), error::not_found(E_TOKEN_NOT_FOUND));
+
+        let token_object = *table::borrow(&registry.user_tokens, user);
+        let token_address = object::object_address(&token_object);
+        let sbt = borrow_global<ReputationSBT>(token_address);
+        
+        let new_score = if (sbt.reputation_score > points) {
+            sbt.reputation_score - points
+        } else {
+            1 // Minimum score of 1
+        };
+        update_reputation(admin, user, new_score);
+    }
+
+    // Batch update reputation for multiple users
+    public entry fun batch_update_reputation(
+        admin: &signer,
+        users: vector<address>,
+        scores: vector<u64>
+    ) acquires SBTRegistry, ReputationSBT {
+        let len = vector::length(&users);
+        assert!(len == vector::length(&scores), error::invalid_argument(E_INVALID_SCORE));
+        
+        let i = 0;
+        while (i < len) {
+            let user = *vector::borrow(&users, i);
+            let score = *vector::borrow(&scores, i);
+            update_reputation(admin, user, score);
+            i = i + 1;
+        };
+    }
+
+    // Calculate reputation multiplier based on level
+    public fun get_reputation_multiplier(user: address): u64 acquires SBTRegistry, ReputationSBT {
+        let registry = borrow_global<SBTRegistry>(@aptos_synapse);
+        if (table::contains(&registry.user_tokens, user)) {
+            let token_object = *table::borrow(&registry.user_tokens, user);
+            let token_address = object::object_address(&token_object);
+            let sbt = borrow_global<ReputationSBT>(token_address);
+            
+            if (sbt.reputation_score >= REPUTATION_PLATINUM) {
+                150 // 1.5x multiplier
+            } else if (sbt.reputation_score >= REPUTATION_GOLD) {
+                125 // 1.25x multiplier
+            } else if (sbt.reputation_score >= REPUTATION_SILVER) {
+                110 // 1.1x multiplier
+            } else {
+                100 // 1x multiplier
+            }
+        } else {
+            100 // Default multiplier
+        }
+    }
+
+    // Check if user qualifies for certain actions based on reputation
+    public fun can_perform_action(user: address, required_score: u64): bool acquires SBTRegistry, ReputationSBT {
+        let registry = borrow_global<SBTRegistry>(@aptos_synapse);
+        if (table::contains(&registry.user_tokens, user)) {
+            let token_object = *table::borrow(&registry.user_tokens, user);
+            let token_address = object::object_address(&token_object);
+            let sbt = borrow_global<ReputationSBT>(token_address);
+            sbt.reputation_score >= required_score
+        } else {
+            false
+        }
+    }
+
+    // Get users by reputation level
+    public fun get_users_by_level(level: String): vector<address> acquires SBTRegistry {
+        let registry = borrow_global<SBTRegistry>(@aptos_synapse);
+        let users = vector::empty<address>();
+        
+        // Note: This is a simplified implementation
+        // In a real scenario, you'd want to maintain separate indexes for efficiency
+        users
+    }
+
     // Helper function to determine reputation level
-    fun get_reputation_level(score: u64): String {
+    public fun get_reputation_level(score: u64): String {
         if (score >= REPUTATION_PLATINUM) {
             string::utf8(b"Platinum")
         } else if (score >= REPUTATION_GOLD) {

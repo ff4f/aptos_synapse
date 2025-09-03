@@ -1,20 +1,26 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { tappExchangeAPI, SwapQuote, TokenInfo } from '@/lib/tapp-exchange';
+import { tappExchangeAPI, SwapQuote, TokenInfo, SwapParams } from '@/lib/tapp-exchange';
 import { useWallet } from '@aptos-labs/wallet-adapter-react';
 
 interface SwapProps {
   className?: string;
 }
 
+interface SwapState {
+  status: 'idle' | 'getting_quote' | 'signing' | 'submitting' | 'success' | 'error';
+  quote?: SwapQuote;
+  error?: string;
+  transactionHash?: string;
+}
+
 export function Swap({ className = '' }: SwapProps) {
-  const { account } = useWallet();
+  const { account, signAndSubmitTransaction } = useWallet();
   const [fromToken, setFromToken] = useState('APT');
   const [toToken, setToToken] = useState('USDC');
   const [amount, setAmount] = useState('');
-  const [quote, setQuote] = useState<SwapQuote | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [swapState, setSwapState] = useState<SwapState>({ status: 'idle' });
   const [tokens, setTokens] = useState<TokenInfo[]>([]);
   const [slippage, setSlippage] = useState('0.5');
 
@@ -25,31 +31,32 @@ export function Swap({ className = '' }: SwapProps) {
   const loadTokens = async () => {
     try {
       const tokenList = await tappExchangeAPI.getTokenList();
+      console.log('Loaded tokens:', tokenList);
       setTokens(tokenList);
     } catch (error) {
       console.error('Failed to load tokens:', error);
-      // Fallback to default tokens
-      setTokens([
-        { symbol: 'APT', name: 'Aptos', address: '0x1::aptos_coin::AptosCoin', decimals: 8, verified: true },
-        { symbol: 'USDC', name: 'USD Coin', address: '0x5e156f1207d0ebfa19a9eeff00d62a282278fb8719f4fab3a586a0a2c0fffbea::coin::T', decimals: 6, verified: true },
-        { symbol: 'USDT', name: 'Tether USD', address: '0x357b0b74bc833e95a115ad22604854d6b0fca151cecd94111770e5d6ffc9dc2b::coin::T', decimals: 6, verified: true },
-        { symbol: 'WETH', name: 'Wrapped Ethereum', address: '0xcc8a89c8dce9693d354449f1f73e60e14e347417854f029db5bc8e7454008abb::coin::T', decimals: 8, verified: true },
-      ]);
+      // This should not happen anymore since getTokenList now handles fallbacks internally
+      setTokens([]);
     }
   };
 
   const getQuote = async () => {
-    if (!amount || !fromToken || !toToken) return;
+    if (!account || !amount || parseFloat(amount) <= 0) {
+      setSwapState({ status: 'error', error: 'Invalid amount or not connected' });
+      return;
+    }
 
-    setLoading(true);
+    setSwapState({ status: 'getting_quote' });
+    
     try {
-      const swapQuote = await tappExchangeAPI.getSwapQuote(
+      const swapParams: SwapParams = {
         fromToken,
         toToken,
-        amount,
-        parseFloat(slippage)
-      );
-      setQuote(swapQuote);
+        fromAmount: amount,
+        slippage: parseFloat(slippage)
+      };
+      const quote = await tappExchangeAPI.getSwapQuote(swapParams);
+      setSwapState({ status: 'idle', quote });
     } catch (error) {
       console.error('Failed to get swap quote:', error);
       // Mock quote for demo
@@ -57,55 +64,69 @@ export function Swap({ className = '' }: SwapProps) {
                        fromToken === 'USDC' && toToken === 'APT' ? 0.08 : 1;
       const outputAmount = (parseFloat(amount) * mockPrice * (1 - parseFloat(slippage) / 100)).toString();
       
-      setQuote({
-        inputToken: fromToken,
-        outputToken: toToken,
-        inputAmount: amount,
-        outputAmount: outputAmount,
-        priceImpact: '0.1',
-        fee: (parseFloat(amount) * 0.003).toString(),
-        estimatedGas: '1000',
-        route: [{
-          tokenIn: fromToken,
-          tokenOut: toToken,
-          amountIn: amount,
-          amountOut: outputAmount,
-          pool: 'APT-USDC',
-          fee: '0.3'
-        }]
+      setSwapState({
+        status: 'idle',
+        quote: {
+          fromToken: fromToken,
+          toToken: toToken,
+          fromAmount: amount,
+          toAmount: outputAmount,
+          minAmountOut: (parseFloat(outputAmount) * 0.99).toString(),
+          priceImpact: 0.1,
+          route: [{
+            tokenIn: fromToken,
+            tokenOut: toToken,
+            amountIn: amount,
+            amountOut: outputAmount,
+            pool: 'APT-USDC',
+            fee: '0.3'
+          }],
+          unsignedPayload: {
+            function: '0x1::coin::transfer',
+            type_arguments: [],
+            arguments: []
+          }
+        }
       });
-    } finally {
-      setLoading(false);
     }
   };
 
   const executeSwap = async () => {
-    if (!account || !quote) return;
+    if (!swapState.quote || !account) {
+      setSwapState({ status: 'error', error: 'No quote available or wallet not connected' });
+      return;
+    }
 
-    setLoading(true);
+    setSwapState({ status: 'signing' });
+
     try {
-      const transaction = await tappExchangeAPI.executeSwap(
-        fromToken,
-        toToken,
-        amount,
-        quote.outputAmount,
-        account.address.toString(),
-        parseFloat(slippage)
-      );
+      // Sign the transaction with wallet
+      const response = await signAndSubmitTransaction({
+        data: swapState.quote.unsignedPayload,
+        sender: account.address
+      });
+
+      setSwapState({ status: 'submitting' });
+
+      // Submit signed transaction to Tapp.Exchange
+      const transactionHash = await tappExchangeAPI.submitSignedTransaction(response.hash);
       
-      alert(`Swap executed! Transaction hash: ${transaction.hash}`);
+      setSwapState({ 
+        status: 'success', 
+        transactionHash,
+        quote: swapState.quote 
+      });
+
     } catch (error) {
       console.error('Failed to execute swap:', error);
-      alert('Failed to execute swap. Please try again.');
-    } finally {
-      setLoading(false);
+      setSwapState({ status: 'error', error: (error as Error).message });
     }
   };
 
   const switchTokens = () => {
     setFromToken(toToken);
     setToToken(fromToken);
-    setQuote(null);
+    setSwapState({ status: 'idle' });
   };
 
   return (
@@ -151,7 +172,7 @@ export function Swap({ className = '' }: SwapProps) {
             <select
               value={fromToken}
               onChange={(e) => setFromToken(e.target.value)}
-              className="flex-1 p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="flex-1 p-3 border border-gray-400 rounded-lg bg-white text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
             >
               {tokens.map((token) => (
                 <option key={token.symbol} value={token.symbol}>
@@ -164,7 +185,7 @@ export function Swap({ className = '' }: SwapProps) {
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0.0"
-              className="flex-1 p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="flex-1 p-3 border border-gray-400 rounded-lg bg-white text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 placeholder:text-gray-500"
             />
           </div>
         </div>
@@ -190,7 +211,7 @@ export function Swap({ className = '' }: SwapProps) {
             <select
               value={toToken}
               onChange={(e) => setToToken(e.target.value)}
-              className="flex-1 p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="flex-1 p-3 border border-gray-400 rounded-lg bg-white text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
             >
               {tokens.map((token) => (
                 <option key={token.symbol} value={token.symbol}>
@@ -198,8 +219,8 @@ export function Swap({ className = '' }: SwapProps) {
                 </option>
               ))}
             </select>
-            <div className="flex-1 p-3 border border-gray-300 rounded-md bg-gray-50">
-              {quote ? parseFloat(quote.outputAmount).toFixed(6) : '0.0'}
+            <div className="flex-1 p-3 border border-gray-400 rounded-lg bg-gray-50 text-gray-900">
+              {swapState.quote ? parseFloat(swapState.quote.toAmount).toFixed(6) : '0.0'}
             </div>
           </div>
         </div>
@@ -207,53 +228,65 @@ export function Swap({ className = '' }: SwapProps) {
         {/* Get Quote Button */}
         <button
           onClick={getQuote}
-          disabled={loading || !amount || fromToken === toToken}
+          disabled={swapState.status === 'getting_quote' || !amount || fromToken === toToken}
           className="w-full bg-blue-600 text-white py-3 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
         >
-          {loading ? 'Getting Quote...' : 'Get Quote'}
+          {swapState.status === 'getting_quote' ? 'Getting Quote...' : 'Get Quote'}
         </button>
 
+        {/* Error Display */}
+        {swapState.status === 'error' && swapState.error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+            {swapState.error}
+          </div>
+        )}
+
+        {/* Success Display */}
+        {swapState.status === 'success' && swapState.transactionHash && (
+          <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg">
+            Swap successful! Transaction: {swapState.transactionHash}
+          </div>
+        )}
+
         {/* Quote Display */}
-        {quote && (
+        {swapState.quote && (
           <div className="bg-gray-50 rounded-md p-4 space-y-2">
             <h4 className="font-medium text-gray-900">Swap Details</h4>
             <div className="text-sm text-gray-600 space-y-1">
               <div className="flex justify-between">
                 <span>You pay:</span>
-                <span>{quote.inputAmount} {quote.inputToken}</span>
+                <span>{swapState.quote.fromAmount} {swapState.quote.fromToken}</span>
               </div>
               <div className="flex justify-between">
                 <span>You receive:</span>
-                <span>{parseFloat(quote.outputAmount).toFixed(6)} {quote.outputToken}</span>
+                <span>{parseFloat(swapState.quote.toAmount).toFixed(6)} {swapState.quote.toToken}</span>
               </div>
               <div className="flex justify-between">
                 <span>Price impact:</span>
-                <span className={parseFloat(quote.priceImpact) > 1 ? 'text-red-600' : 'text-green-600'}>
-                  {quote.priceImpact}%
+                <span className={parseFloat(swapState.quote.priceImpact.toString()) > 1 ? 'text-red-600' : 'text-green-600'}>
+                  {swapState.quote.priceImpact}%
                 </span>
               </div>
               <div className="flex justify-between">
-                <span>Trading fee:</span>
-                <span>{quote.fee} {quote.inputToken}</span>
+                <span>Min amount out:</span>
+                <span>{swapState.quote.minAmountOut} {swapState.quote.toToken}</span>
               </div>
-              <div className="flex justify-between">
-                <span>Estimated gas:</span>
-                <span>{quote.estimatedGas}</span>
-              </div>
-              {quote.route && quote.route.length > 0 && (
+              {swapState.quote.route && swapState.quote.route.length > 0 && (
                 <div className="flex justify-between">
                   <span>Route:</span>
-                  <span>{quote.route.map(r => r.pool).join(' → ')}</span>
+                  <span>{swapState.quote.route.map(r => r.pool).join(' → ')}</span>
                 </div>
               )}
             </div>
             
             <button
               onClick={executeSwap}
-              disabled={loading || !account}
+              disabled={['signing', 'submitting'].includes(swapState.status) || !account}
               className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors mt-4"
             >
-              {loading ? 'Processing...' : account ? 'Execute Swap' : 'Connect Wallet'}
+              {swapState.status === 'signing' ? 'Signing...' : 
+               swapState.status === 'submitting' ? 'Submitting...' : 
+               account ? 'Execute Swap' : 'Connect Wallet'}
             </button>
           </div>
         )}

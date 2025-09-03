@@ -1,14 +1,14 @@
-// Tapp.Exchange API Integration for DEX functionality
+// Tapp.Exchange API Integration for DEX functionality using JSON-RPC
 
 interface SwapQuote {
-  inputToken: string;
-  outputToken: string;
-  inputAmount: string;
-  outputAmount: string;
-  priceImpact: string;
-  fee: string;
-  route: SwapRoute[];
-  estimatedGas: string;
+  fromToken: string;
+  toToken: string;
+  fromAmount: string;
+  toAmount: string;
+  minAmountOut: string;
+  priceImpact: number;
+  route: any[];
+  unsignedPayload: any; // The payload that needs to be signed
 }
 
 interface SwapRoute {
@@ -70,6 +70,14 @@ interface MarketData {
   totalSupply: string;
 }
 
+interface SwapParams {
+  fromToken: string;
+  toToken: string;
+  fromAmount: string;
+  slippage?: number;
+  deadline?: number;
+}
+
 interface SwapSettings {
   slippage: number;
   deadline: number;
@@ -90,50 +98,92 @@ interface OrderBook {
 }
 
 class TappClient {
-  private apiKey: string;
-  private baseUrl: string;
-  private wsUrl: string;
+  private baseURL: string;
   private ws?: WebSocket;
 
-  constructor() {
-    this.apiKey = process.env.NEXT_PUBLIC_TAPP_EXCHANGE_API_KEY || '';
-    this.baseUrl = process.env.NEXT_PUBLIC_TAPP_EXCHANGE_API_URL || 'https://api.tapp.exchange';
-    this.wsUrl = process.env.NEXT_PUBLIC_TAPP_EXCHANGE_WS_URL || 'wss://ws.tapp.exchange';
+  constructor(network: 'testnet' | 'mainnet' = 'testnet') {
+    this.baseURL = network === 'testnet' 
+      ? 'https://testnet.api.tapp.exchange/api/v1' 
+      : 'https://api.tapp.exchange/api/v1';
   }
 
   private getHeaders() {
     return {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${this.apiKey}`,
     };
   }
 
   // Basic Swap Functions
-  async getSwapQuote(
-    inputToken: string,
-    outputToken: string,
-    inputAmount: string,
-    slippage: number = 0.5
-  ): Promise<SwapQuote> {
+  /**
+   * Get swap quote with unsigned payload using JSON-RPC
+   */
+  async getSwapQuote(params: SwapParams): Promise<SwapQuote> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/swap/quote`, {
+      const response = await fetch(this.baseURL, {
         method: 'POST',
         headers: this.getHeaders(),
         body: JSON.stringify({
-          inputToken,
-          outputToken,
-          inputAmount,
-          slippage,
-        }),
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'public/swap_quote',
+          params: {
+            fromToken: params.fromToken,
+            toToken: params.toToken,
+            fromAmount: params.fromAmount,
+            slippage: params.slippage || 0.5,
+            deadline: params.deadline || Math.floor(Date.now() / 1000) + 600, // 10 minutes default
+          }
+        })
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to get swap quote: ${response.statusText}`);
+        throw new Error(`Tapp.Exchange API error: ${response.statusText}`);
       }
 
-      return await response.json();
+      const data = await response.json();
+      
+      if (data.error) {
+        throw new Error(`Tapp.Exchange error: ${data.error.message}`);
+      }
+      
+      return data.result;
     } catch (error) {
       console.error('Tapp.Exchange API Error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Submit signed transaction to Tapp.Exchange
+   */
+  async submitSignedTransaction(signedTxHash: string): Promise<string> {
+    try {
+      const response = await fetch(this.baseURL, {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'public/sc_submit',
+          params: {
+            hash: signedTxHash
+          }
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Tapp.Exchange submit error: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.error) {
+        throw new Error(`Tapp.Exchange error: ${data.error.message}`);
+      }
+      
+      return data.result.transactionHash;
+    } catch (error) {
+      console.error('Tapp.Exchange submit error:', error);
       throw error;
     }
   }
@@ -147,7 +197,7 @@ class TappClient {
     settings: SwapSettings = { slippage: 0.5, deadline: 20 }
   ): Promise<SwapTransaction> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/swap/execute`, {
+      const response = await fetch(`${this.baseURL}/v1/swap/execute`, {
         method: 'POST',
         headers: this.getHeaders(),
         body: JSON.stringify({
@@ -177,7 +227,7 @@ class TappClient {
     inputAmount: string
   ): Promise<SwapRoute[]> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/swap/route`, {
+      const response = await fetch(`${this.baseURL}/v1/swap/route`, {
         method: 'POST',
         headers: this.getHeaders(),
         body: JSON.stringify({
@@ -200,27 +250,109 @@ class TappClient {
   }
 
   // Token and Market Data
-  async getTokenList(): Promise<TokenInfo[]> {
+  /**
+   * Get token list using JSON-RPC
+   * Method: public/token (from Tapp Exchange documentation)
+   */
+  async getTokenList(page: number = 1, pageSize: number = 100): Promise<TokenInfo[]> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/tokens`, {
+      const response = await fetch(this.baseURL, {
+        method: 'POST',
         headers: this.getHeaders(),
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'public/token',
+          params: {
+            page,
+            pageSize
+          }
+        })
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to get token list: ${response.statusText}`);
+        console.warn(`Tapp.Exchange API not available: ${response.statusText}. Using fallback tokens.`);
+        return this.getFallbackTokens();
       }
 
       const data = await response.json();
-      return data.tokens || [];
+      
+      if (data.error) {
+        console.warn(`Tapp.Exchange error: ${data.error.message}. Using fallback tokens.`);
+        return this.getFallbackTokens();
+      }
+      
+      const tokens = data.result?.tokens || [];
+      
+      // If API returns empty array, use fallback
+      if (tokens.length === 0) {
+        console.warn('Tapp.Exchange returned empty token list. Using fallback tokens.');
+        return this.getFallbackTokens();
+      }
+      
+      return tokens;
     } catch (error) {
-      console.error('Tapp.Exchange API Error:', error);
-      return [];
+      console.warn('Tapp.Exchange API Error:', error, '. Using fallback tokens.');
+      return this.getFallbackTokens();
     }
+  }
+
+  private getFallbackTokens(): TokenInfo[] {
+    return [
+      { 
+        symbol: 'APT', 
+        name: 'Aptos', 
+        address: '0x1::aptos_coin::AptosCoin', 
+        decimals: 8, 
+        verified: true,
+        logoURI: 'https://raw.githubusercontent.com/PancakeSwap/pancake-frontend/develop/public/images/tokens/0x1.png'
+      },
+      { 
+        symbol: 'USDC', 
+        name: 'USD Coin', 
+        address: '0x5e156f1207d0ebfa19a9eeff00d62a282278fb8719f4fab3a586a0a2c0fffbea::coin::T', 
+        decimals: 6, 
+        verified: true,
+        logoURI: 'https://raw.githubusercontent.com/PancakeSwap/pancake-frontend/develop/public/images/tokens/usdc.png'
+      },
+      { 
+        symbol: 'USDT', 
+        name: 'Tether USD', 
+        address: '0x357b0b74bc833e95a115ad22604854d6b0fca151cecd94111770e5d6ffc9dc2b::coin::T', 
+        decimals: 6, 
+        verified: true,
+        logoURI: 'https://raw.githubusercontent.com/PancakeSwap/pancake-frontend/develop/public/images/tokens/usdt.png'
+      },
+      { 
+        symbol: 'WETH', 
+        name: 'Wrapped Ethereum', 
+        address: '0xcc8a89c8dce9693d354449f1f73e60e14e347417854f029db5bc8e7454008abb::coin::T', 
+        decimals: 8, 
+        verified: true,
+        logoURI: 'https://raw.githubusercontent.com/PancakeSwap/pancake-frontend/develop/public/images/tokens/weth.png'
+      },
+      { 
+        symbol: 'BTC', 
+        name: 'Bitcoin', 
+        address: '0xae478ff7d83ed072dbc5e264250e67ef58f57c99d89b447efd8a0a2e8b2be76e::coin::T', 
+        decimals: 8, 
+        verified: true,
+        logoURI: 'https://raw.githubusercontent.com/PancakeSwap/pancake-frontend/develop/public/images/tokens/btc.png'
+      },
+      { 
+        symbol: 'SOL', 
+        name: 'Solana', 
+        address: '0xdd89c0e695df0692205912fb69fc290418bed0dbe6e4573d744a6d5e6bab6c13::coin::T', 
+        decimals: 8, 
+        verified: true,
+        logoURI: 'https://raw.githubusercontent.com/PancakeSwap/pancake-frontend/develop/public/images/tokens/sol.png'
+      }
+    ];
   }
 
   async getTokenPrice(tokenAddress: string): Promise<{ price: string; change24h: string }> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/tokens/${tokenAddress}/price`, {
+      const response = await fetch(`${this.baseURL}/v1/tokens/${tokenAddress}/price`, {
         headers: this.getHeaders(),
       });
 
@@ -237,7 +369,7 @@ class TappClient {
 
   async getMarketData(tokenAddress: string): Promise<MarketData | null> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/tokens/${tokenAddress}/market`, {
+      const response = await fetch(`${this.baseURL}/v1/tokens/${tokenAddress}`, {
         headers: this.getHeaders(),
       });
 
@@ -254,7 +386,7 @@ class TappClient {
 
   async getTopTokens(limit: number = 50): Promise<MarketData[]> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/tokens/top?limit=${limit}`, {
+      const response = await fetch(`${this.baseURL}/v1/tokens/top?limit=${limit}`, {
         headers: this.getHeaders(),
       });
 
@@ -273,7 +405,7 @@ class TappClient {
   // Pool and Liquidity Functions
   async getPools(): Promise<PoolInfo[]> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/pools`, {
+      const response = await fetch(`${this.baseURL}/v1/pools`, {
         headers: this.getHeaders(),
       });
 
@@ -289,9 +421,47 @@ class TappClient {
     }
   }
 
+  /**
+   * Get pool information using JSON-RPC
+   * Method: public/pool_info (from Tapp Exchange documentation)
+   */
   async getPoolInfo(poolAddress: string): Promise<PoolInfo | null> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/pools/${poolAddress}`, {
+      const response = await fetch(this.baseURL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'public/pool_info',
+          params: {
+            poolAddress
+          }
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.error) {
+        throw new Error(`API error: ${data.error.message}`);
+      }
+      
+      return data.result;
+    } catch (error) {
+      console.error('Error fetching pool info:', error);
+      throw error;
+    }
+  }
+
+  async getPoolInfoOld(poolAddress: string): Promise<PoolInfo | null> {
+    try {
+      const response = await fetch(`${this.baseURL}/v1/pools/${poolAddress}`, {
         headers: this.getHeaders(),
       });
 
@@ -315,7 +485,7 @@ class TappClient {
     fee: string = '0.3'
   ): Promise<{ hash: string; positionId: string }> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/liquidity/add`, {
+      const response = await fetch(`${this.baseURL}/v1/liquidity/add`, {
         method: 'POST',
         headers: this.getHeaders(),
         body: JSON.stringify({
@@ -345,7 +515,7 @@ class TappClient {
     userAddress: string
   ): Promise<{ hash: string }> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/liquidity/remove`, {
+      const response = await fetch(`${this.baseURL}/v1/liquidity/remove`, {
         method: 'POST',
         headers: this.getHeaders(),
         body: JSON.stringify({
@@ -368,7 +538,7 @@ class TappClient {
 
   async getUserLiquidityPositions(userAddress: string): Promise<LiquidityPosition[]> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/users/${userAddress}/positions`, {
+      const response = await fetch(`${this.baseURL}/v1/users/${userAddress}/positions`, {
         headers: this.getHeaders(),
       });
 
@@ -387,7 +557,7 @@ class TappClient {
   // Transaction History
   async getUserSwapHistory(userAddress: string, limit: number = 10): Promise<SwapTransaction[]> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/users/${userAddress}/swaps?limit=${limit}`, {
+      const response = await fetch(`${this.baseURL}/v1/users/${userAddress}/swaps?limit=${limit}`, {
         headers: this.getHeaders(),
       });
 
@@ -405,7 +575,7 @@ class TappClient {
 
   async getSwapTransaction(txHash: string): Promise<SwapTransaction | null> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/swaps/${txHash}`, {
+      const response = await fetch(`${this.baseURL}/v1/swaps/${txHash}`, {
         headers: this.getHeaders(),
       });
 
@@ -423,7 +593,7 @@ class TappClient {
   // Advanced Features
   async getOrderBook(token0: string, token1: string): Promise<OrderBook> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/orderbook/${token0}/${token1}`, {
+      const response = await fetch(`${this.baseURL}/v1/orderbook/${token0}/${token1}`, {
         headers: this.getHeaders(),
       });
 
@@ -444,7 +614,7 @@ class TappClient {
 
   async getPoolAnalytics(poolAddress: string, timeframe: '1h' | '24h' | '7d' | '30d' = '24h') {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/pools/${poolAddress}/analytics?timeframe=${timeframe}`, {
+      const response = await fetch(`${this.baseURL}/v1/pools/${poolAddress}/analytics?timeframe=${timeframe}`, {
         headers: this.getHeaders(),
       });
 
@@ -466,7 +636,7 @@ class TappClient {
     userAddress: string
   ): Promise<{ gasEstimate: string; gasCost: string }> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/swap/gas-estimate`, {
+      const response = await fetch(`${this.baseURL}/v1/swap/gas-estimate`, {
         method: 'POST',
         headers: this.getHeaders(),
         body: JSON.stringify({
@@ -494,7 +664,7 @@ class TappClient {
   // WebSocket Functions
   connectWebSocket(onMessage: (data: any) => void, onError?: (error: Event) => void) {
     try {
-      this.ws = new WebSocket(`${this.wsUrl}?token=${this.apiKey}`);
+      this.ws = new WebSocket('wss://ws.tapp.exchange');
       
       this.ws.onopen = () => {
         console.log('Tapp.Exchange WebSocket connected');
@@ -584,10 +754,19 @@ class TappClient {
   }
 }
 
-export const tappClient = new TappClient();
+// Export TappClient class for custom instantiation
+export { TappClient };
+export default TappClient;
+
+// Create a default instance for easy use
+export const tappClient = new TappClient('testnet');
+export const tappExchangeAPI = tappClient;
+
+// Export types
 export type {
   SwapQuote,
   SwapRoute,
+  SwapParams,
   TokenInfo,
   PoolInfo,
   SwapTransaction,
@@ -597,6 +776,3 @@ export type {
   OrderBook,
   OrderBookEntry,
 };
-
-// Legacy export for backward compatibility
-export const tappExchangeAPI = tappClient;

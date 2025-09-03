@@ -1,4 +1,6 @@
 // Hyperion Analytics API Integration
+import { FallbackHandler } from './fallback-handler';
+import { logger } from './logger';
 
 interface AnalyticsData {
   timestamp: number;
@@ -170,8 +172,10 @@ class HyperionClient {
   private baseUrl: string;
   private wsUrl: string;
   private wsConnection: WebSocket | null = null;
+  private fallbackHandler: FallbackHandler;
 
   constructor() {
+    this.fallbackHandler = FallbackHandler.getInstance();
     this.apiKey = process.env.NEXT_PUBLIC_HYPERION_API_KEY || '';
     this.baseUrl = process.env.NEXT_PUBLIC_HYPERION_API_URL || 'https://api.hyperion.xyz';
     this.wsUrl = process.env.NEXT_PUBLIC_HYPERION_WS_URL || 'wss://ws.hyperion.xyz';
@@ -194,11 +198,37 @@ class HyperionClient {
         throw new Error(`Failed to get user analytics: ${response.statusText}`);
       }
 
-      return await response.json();
+      const data = await response.json();
+      logger.info('HYPERION', 'User analytics fetched successfully', { address });
+      return data;
     } catch (error) {
-      console.error('Hyperion API Error:', error);
+      logger.error('HYPERION', 'Error fetching user analytics', { address, error });
       throw error;
     }
+  }
+
+  async getUserAnalyticsWithFallback(address: string): Promise<UserAnalytics> {
+    return this.fallbackHandler.withFallback(
+      'HYPERION',
+      () => this.getUserAnalytics(address),
+      () => this.getMockUserAnalytics(address)
+    );
+  }
+
+  private getMockUserAnalytics(address: string): Promise<UserAnalytics> {
+    logger.warn('HYPERION', 'Using mock user analytics data', { address });
+    return Promise.resolve({
+      address,
+      totalTransactions: 0,
+      totalVolume: '0',
+      averageTransactionSize: '0',
+      mostUsedTokens: [],
+      activityScore: 0,
+      riskScore: 50,
+      reputationScore: 0,
+      behaviorPattern: 'unknown',
+      lastActivity: Date.now()
+    });
   }
 
   async getProtocolAnalytics(): Promise<ProtocolAnalytics> {
@@ -651,6 +681,7 @@ class HyperionClient {
 }
 
 export const hyperionClient = new HyperionClient();
+export const hyperionAPI = hyperionClient;
 export type {
   AnalyticsData,
   UserAnalytics,

@@ -4,9 +4,19 @@ import { useState, useEffect } from 'react';
 import { useWallet } from '@aptos-labs/wallet-adapter-react';
 import { useAccount } from 'wagmi';
 import { KanaBridge } from './KanaBridge';
-import { Swap } from './Swap';
+import { SwapInterface } from './SwapInterface';
 import { Lending } from './Lending';
 import { Analytics } from './Analytics';
+import { WalletDashboard } from './WalletDashboard';
+import { TabNavigation } from './TabNavigation';
+import { ProviderStatus } from './ProviderStatus';
+import { 
+  NoditErrorBoundary, 
+  HyperionErrorBoundary, 
+  KanaErrorBoundary, 
+  TappErrorBoundary 
+} from './ProviderErrorBoundary';
+import { envValidator } from '../lib/env-validator';
 
 interface ProtocolMetrics {
   totalValueLocked: string;
@@ -31,7 +41,7 @@ export function Dashboard() {
   const { account: aptosAccount, connected: aptosConnected } = useWallet();
   const { address: evmAddress, isConnected: evmConnected } = useAccount();
   
-  const [activeTab, setActiveTab] = useState<'overview' | 'bridge' | 'swap' | 'lending' | 'analytics'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'bridge' | 'swap' | 'lending' | 'analytics' | 'wallet'>('overview');
   const [protocolMetrics, setProtocolMetrics] = useState<ProtocolMetrics>({
     totalValueLocked: '0',
     totalBorrowed: '0',
@@ -50,8 +60,13 @@ export function Dashboard() {
     swapTransactions: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [envValidation, setEnvValidation] = useState<any>(null);
 
   useEffect(() => {
+    // Validate environment variables on component mount
+    const validation = envValidator.validateAll();
+    setEnvValidation(validation);
+    
     loadProtocolMetrics();
     if (aptosConnected || evmConnected) {
       loadUserStats();
@@ -128,34 +143,18 @@ export function Dashboard() {
     { id: 'swap', name: 'Swap', icon: '🔄' },
     { id: 'lending', name: 'Lending', icon: '💰' },
     { id: 'analytics', name: 'Analytics', icon: '📈' },
+    { id: 'wallet', name: 'Wallet', icon: '👛' },
   ] as const;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      {/* Header with Tab Navigation */}
-      <div className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <nav className="flex space-x-8 py-4">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center space-x-2 py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
-                  activeTab === tab.id
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <span>{tab.icon}</span>
-                <span>{tab.name}</span>
-              </button>
-            ))}
-          </nav>
-        </div>
+      {/* Tab Navigation */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
+        <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />
       </div>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
         {activeTab === 'overview' && (
           <div className="space-y-8">
             {/* Protocol Metrics */}
@@ -370,15 +369,75 @@ export function Dashboard() {
                   <h3 className="text-lg font-semibold text-gray-900 mb-2">View Analytics</h3>
                   <p className="text-gray-600 text-sm">Track your performance</p>
                 </button>
+
+                <button
+                  onClick={() => setActiveTab('wallet')}
+                  className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow text-left"
+                >
+                  <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mb-4">
+                    <span className="text-2xl">👛</span>
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Wallet Dashboard</h3>
+                  <p className="text-gray-600 text-sm">View balances and tokens</p>
+                </button>
               </div>
             </div>
           </div>
         )}
 
-        {activeTab === 'bridge' && <KanaBridge />}
-        {activeTab === 'swap' && <Swap />}
+        {activeTab === 'bridge' && (
+          <div>
+            {/* Kana Labs Provider Status */}
+            <div className="bg-white border-b mb-6">
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                <ProviderStatus filter="kana" />
+              </div>
+            </div>
+            <KanaErrorBoundary>
+              <KanaBridge />
+            </KanaErrorBoundary>
+          </div>
+        )}
+        {activeTab === 'swap' && (
+          <div>
+            {/* Tapp.Exchange Provider Status */}
+            <div className="bg-white border-b mb-6">
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                <ProviderStatus filter="tapp" />
+              </div>
+            </div>
+            <TappErrorBoundary>
+              <SwapInterface />
+            </TappErrorBoundary>
+          </div>
+        )}
         {activeTab === 'lending' && <Lending />}
-        {activeTab === 'analytics' && <Analytics />}
+        {activeTab === 'analytics' && (
+          <div>
+            {/* Hyperion Provider Status */}
+            <div className="bg-white border-b mb-6">
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                <ProviderStatus filter="hyperion" />
+              </div>
+            </div>
+            <HyperionErrorBoundary>
+              <Analytics />
+            </HyperionErrorBoundary>
+          </div>
+        )}
+        {activeTab === 'wallet' && (
+          <div>
+            {/* Nodit Provider Status */}
+            <div className="bg-white border-b mb-6">
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                <ProviderStatus filter="nodit" />
+              </div>
+            </div>
+            <NoditErrorBoundary>
+              <WalletDashboard />
+            </NoditErrorBoundary>
+          </div>
+        )}
       </main>
     </div>
   );

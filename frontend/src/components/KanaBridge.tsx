@@ -302,7 +302,7 @@ export function KanaBridge({ className = '' }: KanaBridgeProps) {
                   <select
                     value={fromChain}
                     onChange={(e) => setFromChain(e.target.value)}
-                    className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full p-3 border border-gray-400 rounded-lg bg-white text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 placeholder:text-gray-500"
                   >
                     {supportedChains.map((chain) => (
                       <option key={chain} value={chain}>
@@ -331,7 +331,7 @@ export function KanaBridge({ className = '' }: KanaBridgeProps) {
                   <select
                     value={toChain}
                     onChange={(e) => setToChain(e.target.value)}
-                    className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full p-3 border border-gray-400 rounded-lg bg-white text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 placeholder:text-gray-500"
                   >
                     {supportedChains.map((chain) => (
                       <option key={chain} value={chain}>
@@ -351,7 +351,7 @@ export function KanaBridge({ className = '' }: KanaBridgeProps) {
                   <select
                     value={fromToken}
                     onChange={(e) => setFromToken(e.target.value)}
-                    className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full p-3 border border-gray-400 rounded-lg bg-white text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
                   >
                     {supportedTokens.map((token) => (
                       <option key={token.symbol} value={token.symbol}>
@@ -372,7 +372,7 @@ export function KanaBridge({ className = '' }: KanaBridgeProps) {
                   <select
                     value={toToken}
                     onChange={(e) => setToToken(e.target.value)}
-                    className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full p-3 border border-gray-400 rounded-lg bg-white text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
                   >
                     {supportedTokens.map((token) => (
                       <option key={token.symbol} value={token.symbol}>
@@ -394,7 +394,7 @@ export function KanaBridge({ className = '' }: KanaBridgeProps) {
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                     placeholder="Enter amount"
-                    className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full p-3 border border-gray-400 rounded-lg bg-white text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 placeholder:text-gray-500"
                   />
                   {evmBalance && fromChain !== 'aptos' && (
                     <button

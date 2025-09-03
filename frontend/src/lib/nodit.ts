@@ -1,4 +1,7 @@
 // Nodit API Integration for Aptos and Ethereum data
+import { FallbackHandler } from './fallback-handler';
+import { logger } from './logger';
+import { AptosClient } from 'aptos';
 
 interface AptosAccountInfo {
   address: string;
@@ -118,9 +121,35 @@ class NoditClient {
       const data = await response.json();
       return data.data?.coin?.value || '0';
     } catch (error) {
-      console.error('Nodit Aptos API Error:', error);
-      return '0';
+      logger.error('NODIT', 'Aptos balance fetch failed', { address, error });
+      throw error;
     }
+  }
+
+  async getAptosBalanceWithFallback(address: string): Promise<string> {
+    const fallbackHandler = FallbackHandler.getInstance();
+    const aptosClient = new AptosClient('https://fullnode.testnet.aptoslabs.com/v1');
+
+    return fallbackHandler.withFallback(
+      'NODIT',
+      async () => {
+        logger.info('NODIT', 'Fetching Aptos balance via Nodit', { address });
+        return await this.getAptosBalance(address);
+      },
+      async () => {
+        // Fallback to public Aptos RPC
+        logger.warn('NODIT', 'Using fallback public RPC for Aptos balance', { address });
+        try {
+           const resources = await aptosClient.getAccountResources(address);
+           const coinResource = resources.find((r: any) => r.type === '0x1::coin::CoinStore<0x1::aptos_coin::AptosCoin>');
+           const coinData = coinResource?.data as any;
+           return coinData?.coin?.value || '0';
+         } catch (error) {
+          logger.error('NODIT', 'Public RPC fallback failed', { address, error });
+          throw new Error('Public RPC fallback failed');
+        }
+      }
+    );
   }
 
   async getAptosTokenBalances(address: string): Promise<TokenBalance[]> {

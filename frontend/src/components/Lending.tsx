@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@aptos-labs/wallet-adapter-react';
+import { noditClient } from '@/lib/nodit';
 
 interface LendingProps {
   className?: string;
@@ -135,6 +136,37 @@ export function Lending({ className }: LendingProps) {
     setError('');
     
     try {
+      // Create transaction payload for gas estimation
+      const transactionPayload = {
+        type: 'entry_function_payload',
+        function: `${process.env.NEXT_PUBLIC_LENDING_CONTRACT_ADDRESS}::lending::${action}`,
+        type_arguments: [],
+        arguments: [
+          selectedPool.id,
+          (parseFloat(amount) * 100000000).toString(), // Convert to smallest unit
+        ],
+      };
+
+      // Estimate gas using Nodit
+      const gasEstimate = await noditClient.getAptosGasEstimate(transactionPayload);
+      const maxAcceptableGas = parseInt(process.env.NEXT_PUBLIC_MAX_ACCEPTABLE_GAS || '1000000');
+      
+      if (parseInt(gasEstimate.gas_estimate) > maxAcceptableGas) {
+        setError(`Gas fee too high (${gasEstimate.gas_estimate}). Please try again later.`);
+        return;
+      }
+
+      // Show gas estimate to user
+      const confirmTransaction = window.confirm(
+        `Estimated gas: ${gasEstimate.gas_estimate} units\n` +
+        `Action: ${action.charAt(0).toUpperCase() + action.slice(1)} ${amount} ${selectedPool.symbol}\n` +
+        `Continue with transaction?`
+      );
+
+      if (!confirmTransaction) {
+        return;
+      }
+      
       // Mock transaction - in real implementation, this would interact with smart contracts
       await new Promise(resolve => setTimeout(resolve, 2000));
       
@@ -144,8 +176,13 @@ export function Lending({ className }: LendingProps) {
       
       setAmount('');
       setSelectedPool(null);
-    } catch {
-      setError(`Failed to ${action} ${selectedPool.symbol}`);
+    } catch (error: any) {
+      console.error('Transaction failed:', error);
+      if (error.message.includes('Gas fee too high')) {
+        setError(error.message);
+      } else {
+        setError(`Failed to ${action} ${selectedPool.symbol}: ${error.message}`);
+      }
     } finally {
       setLoading(false);
     }
